@@ -422,6 +422,7 @@ void multichannel_conv_outer(float ***image, int16_t ****kernels,
       {
         __m128 sum_vector = _mm_setzero_ps();
         float temp_sum[4];
+        float kernel_sum[4];
         for (c = 0; c < nchannels / 4; c += 4)
         {
           for (x = 0; x < kernel_order; x++)
@@ -429,15 +430,21 @@ void multichannel_conv_outer(float ***image, int16_t ****kernels,
             for (y = 0; y < kernel_order; y++)
             {
               //sum += image[w + x][h + y][c] * kernels[m][c][x][y];
+              printf("\n Single image:   %f", image[w + x][h + y][c]);
+              printf("\n Single kernel:   %d", kernels[m][c][x][y]);
+              printf("\n Single result:   %f", image[w + x][h + y][c] * kernels[m][c][x][y]);
               __m128 image_channels = _mm_setr_ps(image[w + x][h + y][c], image[w + x][h + y][c+1], image[w + x][h + y][c+2], image[w + x][h + y][c+3]);
               __m128 kernels_channels = _mm_setr_ps((float)kernels[m][c][x][y], (float)kernels[m][c+1][x][y], (float)kernels[m][c+2][x][y], (float)kernels[m][c+3][x][y]);
-              __m128 mul_result = _mm_mul_ps(image_channels, kernels_channels);
+              _mm_storeu_ps(kernel_sum, image_channels);
+              printf("\n Kernels_ stored: %f, %f, %f, %f", kernel_sum[0], kernel_sum[1] ,kernel_sum[2] ,kernel_sum[3]);  
+              __m128 mul_result = _mm_mul_ps(kernels_channels,image_channels);
               
               sum_vector = _mm_add_ps(sum_vector, mul_result);
               _mm_storeu_ps(temp_sum, sum_vector);
 
               printf("\n image:   %f, %f, %f, %f",   image[w + x][h + y][c], image[w + x][h + y][c+1], image[w + x][h + y][c+2], image[w + x][h + y][c+3]);
               printf("\n Kernels: %d, %d, %d, %d",   kernels[m][c][x][y],    kernels[m][c+1][x][y],    kernels[m][c+2][x][y],    kernels[m][c+3][x][y]);
+              printf("\n (float) Kernels: %f, %f, %f, %f",   (float)kernels[m][c][x][y],    (float)kernels[m][c+1][x][y],    (float)kernels[m][c+2][x][y],    (float)kernels[m][c+3][x][y]);
               printf("\n Results: %f, %f, %f, %f",   temp_sum[0],temp_sum[1],temp_sum[2],temp_sum[3]);
             }
           }
@@ -445,7 +452,7 @@ void multichannel_conv_outer(float ***image, int16_t ****kernels,
         float temp[4];
           _mm_store_ps(temp, sum_vector);
           float sum = temp[0]+temp[1]+temp[2]+temp[3];
-          output[m][w][h] = (float)sum;
+          output[m][w][h] = sum;
       }
     }
   }
