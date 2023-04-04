@@ -413,7 +413,9 @@ void multichannel_conv_outer(float ***image, int16_t ****kernels,
                              int nchannels, int nkernels, int kernel_order)
 {
   int h, w, x, y, c, m;
-// #pragma omp parallel for collapse(3)
+  int channel_width = nchannels - nchannels % 4;
+
+#pragma omp parallel for private(h, w, x, y, c, m) shared(image, kernels, output)
   for (m = 0; m < nkernels; m++)
   {
     for (w = 0; w < width; w++)
@@ -421,24 +423,19 @@ void multichannel_conv_outer(float ***image, int16_t ****kernels,
       for (h = 0; h < height; h++)
       {
         __m128 sum_vector = _mm_setzero_ps();
+        __m128 image_channels = _mm_setzero_ps();
+        __m128 kernel_channels = _mm_setzero_ps();
         float temp_sum[4];
-        float kernel_sum[4];
-        for (c = 0; c < nchannels / 4; c += 4)
+        for (c = 0; c < channel_width; c += 4)
         {
           for (x = 0; x < kernel_order; x++)
           {
             for (y = 0; y < kernel_order; y++)
             {
               //sum += image[w + x][h + y][c] * kernels[m][c][x][y];
-              printf("\n Single image:   %f", image[w + x][h + y][c]);
-              printf("\n Single kernel:   %d", kernels[m][c][x][y]);
-              printf("\n Single result:   %f", image[w + x][h + y][c] * kernels[m][c][x][y]);
-              __m128 image_channels = _mm_setr_ps(image[w + x][h + y][c], image[w + x][h + y][c+1], image[w + x][h + y][c+2], image[w + x][h + y][c+3]);
-              __m128 kernels_channels = _mm_setr_ps((float)kernels[m][c][x][y], (float)kernels[m][c+1][x][y], (float)kernels[m][c+2][x][y], (float)kernels[m][c+3][x][y]);
-              _mm_storeu_ps(kernel_sum, image_channels);
-              printf("\n Kernels_ stored: %f, %f, %f, %f", kernel_sum[0], kernel_sum[1] ,kernel_sum[2] ,kernel_sum[3]);  
-              __m128 mul_result = _mm_mul_ps(kernels_channels,image_channels);
-              
+              image_channels = _mm_set_ps(image[w+x][h+y][c+3], image[w+x][h+y][c+2], image[w+x][h+y][c+1], image[w+x][h+y][c]);
+              kernel_channels = _mm_set_ps((float)kernels[m][c+3][x][y], (float)kernels[m][c+2][x][y], (float)kernels[m][c+1][x][y], (float)kernels[m][c][x][y]); 
+              __m128 mul_result = _mm_mul_ps(image_channels, kernel_channels);
               sum_vector = _mm_add_ps(sum_vector, mul_result);
               _mm_storeu_ps(temp_sum, sum_vector);
 
@@ -450,9 +447,9 @@ void multichannel_conv_outer(float ***image, int16_t ****kernels,
           }
         }
         float temp[4];
-          _mm_store_ps(temp, sum_vector);
-          float sum = temp[0]+temp[1]+temp[2]+temp[3];
-          output[m][w][h] = sum;
+        _mm_store_ps(temp, sum_vector);
+        double sum = temp[0]+temp[1]+temp[2]+temp[3];
+        output[m][w][h] = sum;
       }
     }
   }
