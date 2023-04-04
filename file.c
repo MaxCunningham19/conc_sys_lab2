@@ -335,6 +335,7 @@ void multichannel_conv(float ***image, int16_t ****kernels,
             for (y = 0; y < kernel_order; y++)
             {
               sum += image[w + x][h + y][c] * kernels[m][c][x][y];
+              // printf("Image:%f Kernel:%d\n",image[w + x][h + y][c], kernels[m][c][x][y]);
             }
           }
           output[m][w][h] = (float)sum;
@@ -370,26 +371,6 @@ double multichannel_conv_insides(float ***image, int16_t ****kernels,
     }
   }
   return sum;
-}
-
-void multichannel_conv_both(float ***image, int16_t ****kernels,
-                            float ***output, int width, int height,
-                            int nchannels, int nkernels, int kernel_order)
-{
-  int h, w, x, y, c, m;
-
-#pragma omp parallel for collapse(3)
-  for (m = 0; m < nkernels; m++)
-  {
-    for (w = 0; w < width; w++)
-    {
-      for (h = 0; h < height; h++)
-      {
-        output[m][w][h] = multichannel_conv_insides(image, kernels,
-                                                    nchannels, kernel_order, w, h, m);
-      }
-    }
-  }
 }
 
 void multichannel_conv_inner(float ***image, int16_t ****kernels,
@@ -432,45 +413,59 @@ void multichannel_conv_outer(float ***image, int16_t ****kernels,
                              int nchannels, int nkernels, int kernel_order)
 {
   int h, w, x, y, c, m;
-#pragma omp parallel for collapse(3)
+// #pragma omp parallel for collapse(3)
   for (m = 0; m < nkernels; m++)
   {
     for (w = 0; w < width; w++)
     {
       for (h = 0; h < height; h++)
       {
-        double sum = 0.0;
-        for (c = 0; c < nchannels; c++)
+        __m128 sum_vector = _mm_setzero_ps();
+        float temp_sum[4];
+        for (c = 0; c < nchannels / 4; c += 4)
         {
           for (x = 0; x < kernel_order; x++)
           {
             for (y = 0; y < kernel_order; y++)
             {
-              sum += image[w + x][h + y][c] * kernels[m][c][x][y];
+              //sum += image[w + x][h + y][c] * kernels[m][c][x][y];
+              __m128 image_channels = _mm_setr_ps(image[w + x][h + y][c], image[w + x][h + y][c+1], image[w + x][h + y][c+2], image[w + x][h + y][c+3]);
+              __m128 kernels_channels = _mm_setr_ps((float)kernels[m][c][x][y], (float)kernels[m][c+1][x][y], (float)kernels[m][c+2][x][y], (float)kernels[m][c+3][x][y]);
+              __m128 mul_result = _mm_mul_ps(image_channels, kernels_channels);
+              
+              sum_vector = _mm_add_ps(sum_vector, mul_result);
+              _mm_storeu_ps(temp_sum, sum_vector);
+
+              printf("\n image:   %f, %f, %f, %f",   image[w + x][h + y][c], image[w + x][h + y][c+1], image[w + x][h + y][c+2], image[w + x][h + y][c+3]);
+              printf("\n Kernels: %d, %d, %d, %d",   kernels[m][c][x][y],    kernels[m][c+1][x][y],    kernels[m][c+2][x][y],    kernels[m][c+3][x][y]);
+              printf("\n Results: %f, %f, %f, %f",   temp_sum[0],temp_sum[1],temp_sum[2],temp_sum[3]);
             }
           }
-          output[m][w][h] = (float)sum;
         }
+        float temp[4];
+          _mm_store_ps(temp, sum_vector);
+          float sum = temp[0]+temp[1]+temp[2]+temp[3];
+          output[m][w][h] = (float)sum;
       }
     }
   }
 }
 
-void inner_sse()
-{
-  double sum = 0.0;
-  for (c = 0; c < nchannels; c++)
-  {
-    for (x = 0; x < kernel_order; x++)
-    {
-      for (y = 0; y < kernel_order; y++)
-      {
-        sum += image[w + x][h + y][c] * kernels[m][c][x][y];
-      }
-    }
-    output[m][w][h] = (float)sum;
-  }
-}
+// void inner_sse()
+// {
+//   double sum = 0.0;
+//   for (c = 0; c < nchannels; c++)
+//   {
+//     for (x = 0; x < kernel_order; x++)
+//     {
+//       for (y = 0; y < kernel_order; y++)
+//       {
+//         sum += image[w + x][h + y][c] * kernels[m][c][x][y];
+//       }
+//     }
+//     output[m][w][h] = (float)sum;
+//   }
+// }
 
 int maxim(int a, int b)
 {
@@ -525,9 +520,12 @@ int main(int argc, char **argv)
   int16_t ****kernels;
   float ***control_output, ***output;
   long long mul_time;
+  long long mul_time_david;
   int width, height, kernel_order, nchannels, nkernels;
   struct timeval start_time;
   struct timeval stop_time;
+  struct timeval start_time_david;
+  struct timeval stop_time_david;
 
   if (argc != 6)
   {
@@ -564,9 +562,17 @@ int main(int argc, char **argv)
 
   // DEBUGGING(write_out(A, a_dim1, a_dim2));
 
+  gettimeofday(&start_time_david, NULL);
   /* use a simple multichannel convolution routine to produce control result */
   multichannel_conv(image, kernels, control_output, width,
                     height, nchannels, nkernels, kernel_order);
+
+  gettimeofday(&stop_time_david, NULL);
+
+  mul_time_david = (stop_time_david.tv_sec - start_time_david.tv_sec) * 1000000L +
+             (stop_time_david.tv_usec - start_time_david.tv_usec);
+             
+  printf("David conv time: %lld microseconds\n", mul_time_david);
 
   /* record starting time of student's code*/
   gettimeofday(&start_time, NULL);
