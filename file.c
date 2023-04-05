@@ -433,6 +433,8 @@ void multichannel_conv_outer(float ***image, int16_t ****kernels,
       for (h = 0; h < height; h++)
       {
         __m128 sum_vector = _mm_setzero_ps();
+        __m128 image_channels = _mm_setzero_ps();
+        __m128 kernel_channels = _mm_setzero_ps();
         float temp_sum[4];
         for (c = 0; c < channel_width; c += 4)
         {
