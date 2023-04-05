@@ -296,6 +296,10 @@ void check_result(float ***result, float ***control,
     {
       for (k = 0; k < dim2; k++)
       {
+        float control_check = control[i][j][k];
+        float result_check = result[i][j][k];
+        //printf("%f", control_check);
+        //printf("%f", result_check);
         double diff = fabs(control[i][j][k] - result[i][j][k]);
         assert(diff >= 0.0);
         sum_abs_diff = sum_abs_diff + diff;
@@ -320,6 +324,7 @@ void multichannel_conv(float ***image, int16_t ****kernels,
                        int nchannels, int nkernels, int kernel_order)
 {
   int h, w, x, y, c, m;
+  FILE *file_ptr = fopen("output_david.txt","w");
 
   for (m = 0; m < nkernels; m++)
   {
@@ -339,10 +344,14 @@ void multichannel_conv(float ***image, int16_t ****kernels,
             }
           }
           output[m][w][h] = (float)sum;
+          if (c == 3) {
+            fprintf(file_ptr,"output[%d][%d][%d] = %f\n",m, w, h, (float)sum);
+          }
         }
       }
     }
   }
+  fclose(file_ptr);
 }
 
 double multichannel_conv_insides(float ***image, int16_t ****kernels,
@@ -413,7 +422,10 @@ void multichannel_conv_outer(float ***image, int16_t ****kernels,
                              int nchannels, int nkernels, int kernel_order)
 {
   int h, w, x, y, c, m;
-// #pragma omp parallel for collapse(3)
+  int channel_width = nchannels - nchannels % 4;
+  FILE *file_ptr = fopen("output_student.txt","a");
+
+// #pragma omp parallel for private (h, w, x, y, c, m) shared (image, kernels, output)
   for (m = 0; m < nkernels; m++)
   {
     for (w = 0; w < width; w++)
@@ -422,40 +434,41 @@ void multichannel_conv_outer(float ***image, int16_t ****kernels,
       {
         __m128 sum_vector = _mm_setzero_ps();
         float temp_sum[4];
-        float kernel_sum[4];
-        for (c = 0; c < nchannels / 4; c += 4)
+        for (c = 0; c < channel_width; c += 4)
         {
+	      __m128 image_channels = _mm_setzero_ps();
+	      __m128 kernel_channels = _mm_setzero_ps();
           for (x = 0; x < kernel_order; x++)
           {
             for (y = 0; y < kernel_order; y++)
             {
               //sum += image[w + x][h + y][c] * kernels[m][c][x][y];
-              printf("\n Single image:   %f", image[w + x][h + y][c]);
-              printf("\n Single kernel:   %d", kernels[m][c][x][y]);
-              printf("\n Single result:   %f", image[w + x][h + y][c] * kernels[m][c][x][y]);
-              __m128 image_channels = _mm_setr_ps(image[w + x][h + y][c], image[w + x][h + y][c+1], image[w + x][h + y][c+2], image[w + x][h + y][c+3]);
-              __m128 kernels_channels = _mm_setr_ps((float)kernels[m][c][x][y], (float)kernels[m][c+1][x][y], (float)kernels[m][c+2][x][y], (float)kernels[m][c+3][x][y]);
-              _mm_storeu_ps(kernel_sum, image_channels);
-              printf("\n Kernels_ stored: %f, %f, %f, %f", kernel_sum[0], kernel_sum[1] ,kernel_sum[2] ,kernel_sum[3]);  
-              __m128 mul_result = _mm_mul_ps(kernels_channels,image_channels);
-              
-              sum_vector = _mm_add_ps(sum_vector, mul_result);
-              _mm_storeu_ps(temp_sum, sum_vector);
-
-              printf("\n image:   %f, %f, %f, %f",   image[w + x][h + y][c], image[w + x][h + y][c+1], image[w + x][h + y][c+2], image[w + x][h + y][c+3]);
-              printf("\n Kernels: %d, %d, %d, %d",   kernels[m][c][x][y],    kernels[m][c+1][x][y],    kernels[m][c+2][x][y],    kernels[m][c+3][x][y]);
-              printf("\n (float) Kernels: %f, %f, %f, %f",   (float)kernels[m][c][x][y],    (float)kernels[m][c+1][x][y],    (float)kernels[m][c+2][x][y],    (float)kernels[m][c+3][x][y]);
-              printf("\n Results: %f, %f, %f, %f",   temp_sum[0],temp_sum[1],temp_sum[2],temp_sum[3]);
+              image_channels = _mm_set_ps(image[w + x][h + y][c+3], image[w + x][h + y][c+2], image[w + x][h + y][c+1], image[w + x][h + y][c]);
+              kernel_channels = _mm_set_ps((float)kernels[m][c+3][x][y], (float)kernels[m][c+2][x][y], (float)kernels[m][c+1][x][y], (float)kernels[m][c][x][y]); 
+	            sum_vector = _mm_add_ps(sum_vector, _mm_mul_ps(kernel_channels,image_channels));
             }
           }
+
+          float temp[4];
+          _mm_storeu_ps(temp, sum_vector);
+          double sum = temp[0]+temp[1]+temp[2]+temp[3];
+    
+          //Deal with the leftovers
+          for (c = channel_width; c < nchannels; c++) {
+            for (x = 0; x < kernel_order; x++) {
+              for (y = 0; y < kernel_order; y++) {
+                sum += image[w + x][h + y][c] * kernels[m][c][x][y];
+              }
+            }
+          }
+
+          output[m][w][h] = (float)sum;
+          fprintf(file_ptr,"output[%d][%d][%d] = %f\n",m, w, h, (float)sum);
         }
-        float temp[4];
-          _mm_store_ps(temp, sum_vector);
-          float sum = temp[0]+temp[1]+temp[2]+temp[3];
-          output[m][w][h] = sum;
       }
     }
   }
+  fclose(file_ptr);
 }
 
 // void inner_sse()
