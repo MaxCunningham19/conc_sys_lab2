@@ -39,6 +39,7 @@
 #include <math.h>
 #include <stdint.h>
 #include <x86intrin.h>
+#include <math.h>
 
 const int MIN = 256;
 
@@ -433,13 +434,11 @@ void multichannel_conv_outer(float ***image, int16_t ****kernels,
       for (h = 0; h < height; h++)
       {
         __m128 sum_vector = _mm_setzero_ps();
-        __m128 image_channels = _mm_setzero_ps();
-        __m128 kernel_channels = _mm_setzero_ps();
-        float temp_sum[4];
         for (c = 0; c < channel_width; c += 4)
         {
 	      __m128 image_channels = _mm_setzero_ps();
 	      __m128 kernel_channels = _mm_setzero_ps();
+        __m128 mul_vector;
           for (x = 0; x < kernel_order; x++)
           {
             for (y = 0; y < kernel_order; y++)
@@ -447,25 +446,34 @@ void multichannel_conv_outer(float ***image, int16_t ****kernels,
               //sum += image[w + x][h + y][c] * kernels[m][c][x][y];
               image_channels = _mm_set_ps(image[w + x][h + y][c+3], image[w + x][h + y][c+2], image[w + x][h + y][c+1], image[w + x][h + y][c]);
               kernel_channels = _mm_set_ps((float)kernels[m][c+3][x][y], (float)kernels[m][c+2][x][y], (float)kernels[m][c+1][x][y], (float)kernels[m][c][x][y]); 
-	            sum_vector = _mm_add_ps(sum_vector, _mm_mul_ps(kernel_channels,image_channels));
+              mul_vector = _mm_mul_ps(kernel_channels,image_channels);
+	            sum_vector = _mm_add_ps(sum_vector, mul_vector);
             }
           }
 
-          float temp[4];
-          _mm_storeu_ps(temp, sum_vector);
-          double sum = temp[0]+temp[1]+temp[2]+temp[3];
+          //Load into float array and add
+          //float temp[4];
+          //_mm_storeu_ps(temp, sum_vector);
+          //double sum = (double)temp[0] + (double)temp[1] + (double)temp[2] + (double)temp[3];;
+          //float sum_float = (float) sum;
+
+          //Use hadd to add
+          __m128 temp_sum = _mm_hadd_ps(sum_vector,sum_vector);
+          temp_sum = _mm_hadd_ps(temp_sum, temp_sum);
+          float sum_result = _mm_cvtss_f32(temp_sum);
+          
     
           //Deal with the leftovers
           for (c = channel_width; c < nchannels; c++) {
             for (x = 0; x < kernel_order; x++) {
               for (y = 0; y < kernel_order; y++) {
-                sum += image[w + x][h + y][c] * kernels[m][c][x][y];
+                sum_result += image[w + x][h + y][c] * kernels[m][c][x][y];
               }
             }
           }
 
-          output[m][w][h] = (float)sum;
-          fprintf(file_ptr,"output[%d][%d][%d] = %f\n",m, w, h, (float)sum);
+          output[m][w][h] = sum_result;
+          fprintf(file_ptr,"output[%d][%d][%d] = %f\n",m, w, h, sum_result);
         }
       }
     }
