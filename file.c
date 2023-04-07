@@ -418,6 +418,57 @@ void multichannel_conv_inner(float ***image, int16_t ****kernels,
   }
 }
 
+float ****trans(int16_t ****kernel, int nkernels, int kernel_order, int nchannels){
+
+  float ****transKernel = new_empty_4d_matrix_float(nkernels, kernel_order, kernel_order, nchannels);
+
+  #pragma omp parallel for simd collapse(4)
+  for (int i = 0; i < nkernels; i++){
+    for (int j = 0; j < nchannels; j++){
+      for (int k = 0; k < kernel_order; k++){
+        for (int l = 0; l < kernel_order; l++){
+          transKernel[i][k][l][j] = kernel[i][j][k][l];
+        }
+      }
+    }
+  }
+  return transKernel;
+}
+
+void temp_conv(float ***image, int16_t ****kernels,
+                       float ***output, int width, int height,
+                       int nchannels, int nkernels, int kernel_order)
+{
+  int x,y,c;
+  int h, w, m;
+  float ****transKernel = trans(kernels, nkernels, kernel_order, nchannels);
+  
+  #pragma omp parallel for collapse(3) shared (x,y,c,h,w,m)
+  for (m = 0; m < nkernels; m++)
+  {
+    for (w = 0; w < width; w++)
+    {
+      for (h = 0; h < height; h++)
+      {
+        double sum = 0.0;
+        for (x = 0; x < kernel_order; x++)
+        {
+          for (y = 0; y < kernel_order; y++)
+          {
+            #pragma omp simd
+            for (c = 0; c< nchannels; c++)
+            {
+              sum += image[w + x][h + y][c] * transKernel[m][x][y][c];
+            }
+          }
+        }
+        output[m][w][h] = (float)sum;
+      }
+    }
+  }
+}
+
+
 void multichannel_conv_outer(float ***image, int16_t ****kernels,
                              float ***output, int width, int height,
                              int nchannels, int nkernels, int kernel_order)
@@ -589,7 +640,6 @@ int main(int argc, char **argv)
   kernels = gen_random_4d_matrix_int16(nkernels, nchannels, kernel_order, kernel_order);
   output = new_empty_3d_matrix_float(nkernels, width, height);
   control_output = new_empty_3d_matrix_float(nkernels, width, height);
-
   // DEBUGGING(write_out(A, a_dim1, a_dim2));
 
   gettimeofday(&start_time_david, NULL);
@@ -608,7 +658,7 @@ int main(int argc, char **argv)
   gettimeofday(&start_time, NULL);
 
   /* perform student's multichannel convolution */
-  student_conv(image, kernels, output, width,
+  temp_conv(image, kernels, output, width,
                height, nchannels, nkernels, kernel_order);
 
   /* record finishing time */
