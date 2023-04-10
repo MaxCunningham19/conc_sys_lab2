@@ -325,8 +325,6 @@ void multichannel_conv(float ***image, int16_t ****kernels,
                        int nchannels, int nkernels, int kernel_order)
 {
   int h, w, x, y, c, m;
-  FILE *file_ptr = fopen("output_david.txt","w");
-
   for (m = 0; m < nkernels; m++)
   {
     for (w = 0; w < width; w++)
@@ -341,74 +339,6 @@ void multichannel_conv(float ***image, int16_t ****kernels,
             for (y = 0; y < kernel_order; y++)
             {
               sum += image[w + x][h + y][c] * kernels[m][c][x][y];
-              // printf("Image:%f Kernel:%d\n",image[w + x][h + y][c], kernels[m][c][x][y]);
-            }
-          }
-          output[m][w][h] = (float)sum;
-          if (c == 3) {
-            fprintf(file_ptr,"output[%d][%d][%d] = %f\n",m, w, h, (float)sum);
-          }
-        }
-      }
-    }
-  }
-  fclose(file_ptr);
-}
-
-double multichannel_conv_insides(float ***image, int16_t ****kernels,
-                                 int nchannels, int kernel_order, int w, int h, int m)
-{
-  double sum = 0.0;
-  double lsum = 0.0;
-#pragma omp parallel private(lsum)
-  {
-    int c, x, y;
-#pragma omp for collapse(3)
-    for (c = 0; c < nchannels; c++)
-    {
-      for (x = 0; x < kernel_order; x++)
-      {
-        for (y = 0; y < kernel_order; y++)
-        {
-
-          lsum += image[w + x][h + y][c] * kernels[m][c][x][y];
-        }
-      }
-    }
-#pragma omp critical
-    {
-      sum += lsum;
-    }
-  }
-  return sum;
-}
-
-void multichannel_conv_inner(float ***image, int16_t ****kernels,
-                             float ***output, int width, int height,
-                             int nchannels, int nkernels, int kernel_order)
-{
-  int h, w, x, y, c, m;
-
-  for (m = 0; m < nkernels; m++)
-  {
-    for (w = 0; w < width; w++)
-    {
-      for (h = 0; h < height; h++)
-      {
-        double sum = 0.0;
-        double lsum = 0.0;
-#pragma parallel for collapse(3)
-        for (c = 0; c < nchannels; c++)
-        {
-          for (x = 0; x < kernel_order; x++)
-          {
-            for (y = 0; y < kernel_order; y++)
-            {
-              double tmp = image[w + x][h + y][c] * kernels[m][c][x][y];
-#pragma omp critical
-              {
-                sum += tmp;
-              }
             }
           }
           output[m][w][h] = (float)sum;
@@ -417,6 +347,9 @@ void multichannel_conv_inner(float ***image, int16_t ****kernels,
     }
   }
 }
+
+
+
 
 float ****trans(int16_t ****kernel, int nkernels, int kernel_order, int nchannels){
 
@@ -435,9 +368,41 @@ float ****trans(int16_t ****kernel, int nkernels, int kernel_order, int nchannel
   return transKernel;
 }
 
-void temp_conv(float ***image, int16_t ****kernels,
+//function made for testing individual speedups
+void speed_up_one(float ***image, int16_t ****kernels,
                        float ***output, int width, int height,
                        int nchannels, int nkernels, int kernel_order)
+{
+  int h, w, x, y, c, m;
+  #pragma omp parallel for collapse(3) shared (x,y,c,h,w,m)
+  for (m = 0; m < nkernels; m++)
+  {
+    for (w = 0; w < width; w++)
+    {
+      for (h = 0; h < height; h++)
+      {
+        double sum = 0.0;
+        for (x = 0; x < kernel_order; x++)
+        {
+          for (y = 0; y < kernel_order; y++)
+          {
+            #pragma omp simd
+            for (c = 0; c< nchannels; c++)
+            {
+              sum += image[w + x][h + y][c] * kernels[m][c][x][y];
+            }
+          }
+        }
+        output[m][w][h] = (float)sum;
+      }
+    }
+  }
+}
+
+/* the fast version of matmul written by the student */
+void student_conv(float ***image, int16_t ****kernels, float ***output,
+                  int width, int height, int nchannels, int nkernels,
+                  int kernel_order)
 {
   int x,y,c;
   int h, w, m;
@@ -466,129 +431,7 @@ void temp_conv(float ***image, int16_t ****kernels,
       }
     }
   }
-}
-
-
-void multichannel_conv_outer(float ***image, int16_t ****kernels,
-                             float ***output, int width, int height,
-                             int nchannels, int nkernels, int kernel_order)
-{
-  int h, w, x, y, c, m;
-  int channel_width = nchannels - nchannels % 4;
-  FILE *file_ptr = fopen("output_student.txt","a");
-
-// #pragma omp parallel for private (h, w, x, y, c, m) shared (image, kernels, output)
-  for (m = 0; m < nkernels; m++)
-  {
-    for (w = 0; w < width; w++)
-    {
-      for (h = 0; h < height; h++)
-      {
-        __m128 sum_vector = _mm_setzero_ps();
-        for (c = 0; c < channel_width; c += 4)
-        {
-	      __m128 image_channels = _mm_setzero_ps();
-	      __m128 kernel_channels = _mm_setzero_ps();
-        __m128 mul_vector;
-          for (x = 0; x < kernel_order; x++)
-          {
-            for (y = 0; y < kernel_order; y++)
-            {
-              //sum += image[w + x][h + y][c] * kernels[m][c][x][y];
-              image_channels = _mm_set_ps(image[w + x][h + y][c+3], image[w + x][h + y][c+2], image[w + x][h + y][c+1], image[w + x][h + y][c]);
-              kernel_channels = _mm_set_ps((float)kernels[m][c+3][x][y], (float)kernels[m][c+2][x][y], (float)kernels[m][c+1][x][y], (float)kernels[m][c][x][y]); 
-              mul_vector = _mm_mul_ps(kernel_channels,image_channels);
-	            sum_vector = _mm_add_ps(sum_vector, mul_vector);
-            }
-          }
-
-          //Load into float array and add
-          //float temp[4];
-          //_mm_storeu_ps(temp, sum_vector);
-          //double sum = (double)temp[0] + (double)temp[1] + (double)temp[2] + (double)temp[3];;
-          //float sum_float = (float) sum;
-
-          //Use hadd to add
-          __m128 temp_sum = _mm_hadd_ps(sum_vector,sum_vector);
-          temp_sum = _mm_hadd_ps(temp_sum, temp_sum);
-          float sum_result = _mm_cvtss_f32(temp_sum);
-          
-    
-          //Deal with the leftovers
-          for (c = channel_width; c < nchannels; c++) {
-            for (x = 0; x < kernel_order; x++) {
-              for (y = 0; y < kernel_order; y++) {
-                sum_result += image[w + x][h + y][c] * kernels[m][c][x][y];
-              }
-            }
-          }
-
-          output[m][w][h] = sum_result;
-          fprintf(file_ptr,"output[%d][%d][%d] = %f\n",m, w, h, sum_result);
-        }
-      }
-    }
-  }
-  fclose(file_ptr);
-}
-
-// void inner_sse()
-// {
-//   double sum = 0.0;
-//   for (c = 0; c < nchannels; c++)
-//   {
-//     for (x = 0; x < kernel_order; x++)
-//     {
-//       for (y = 0; y < kernel_order; y++)
-//       {
-//         sum += image[w + x][h + y][c] * kernels[m][c][x][y];
-//       }
-//     }
-//     output[m][w][h] = (float)sum;
-//   }
-// }
-
-int maxim(int a, int b)
-{
-  return a > b ? a : b;
-}
-
-int pick_algo(int width, int height, int nchannels, int nkernels,
-              int kernel_order)
-{
-  int max = MIN;
-  const int wkh = width * height * nkernels;
-  const int channels = nchannels;
-  max = maxim(wkh, max);
-  max = maxim(nchannels, max);
-
-  if (max == MIN)
-  {
-    return 0;
-  }
-  else if (max == wkh)
-  {
-    return 1;
-  }
-  if (max == nchannels)
-  {
-    return 2;
-  }
-  return 0;
-}
-
-/* the fast version of matmul written by the student */
-void student_conv(float ***image, int16_t ****kernels, float ***output,
-                  int width, int height, int nchannels, int nkernels,
-                  int kernel_order)
-{
-  int val = pick_algo(width, height, nchannels, nkernels, kernel_order);
-  printf("outer\noption: %d \n", val);
-
-  // this call here is just dummy code that calls the slow, simple, correct version.
-  // insert your own code instead
-  multichannel_conv_outer(image, kernels, output, width,
-                          height, nchannels, nkernels, kernel_order);
+  
 }
 
 int main(int argc, char **argv)
@@ -649,8 +492,8 @@ int main(int argc, char **argv)
 
   gettimeofday(&stop_time_david, NULL);
 
-  mul_time_david = (stop_time_david.tv_sec - start_time_david.tv_sec) * 1000000L +
-             (stop_time_david.tv_usec - start_time_david.tv_usec);
+  //mul_time_david = (stop_time_david.tv_sec - start_time_david.tv_sec) * 1000000L +
+  //           (stop_time_david.tv_usec - start_time_david.tv_usec);
              
   printf("David conv time: %lld microseconds\n", mul_time_david);
 
@@ -658,7 +501,7 @@ int main(int argc, char **argv)
   gettimeofday(&start_time, NULL);
 
   /* perform student's multichannel convolution */
-  temp_conv(image, kernels, output, width,
+  student_conv(image, kernels, output, width,
                height, nchannels, nkernels, kernel_order);
 
   /* record finishing time */
