@@ -1,4 +1,12 @@
-/* Test and timing harness program for developing a multichannel
+/*
+   Submission for Assignmnet 2 of concurrent systems.
+   Group members:
+   
+   Max Cunningham - SN: 20333171
+   Kenneth Harmon - SN: 20333659
+   Ryan Francis - SN: 20333329
+
+   Test and timing harness program for developing a multichannel
    multikernel convolution (as used in deep learning networks)
 
    Note there are some simplifications around this implementation,
